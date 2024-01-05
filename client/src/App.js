@@ -104,9 +104,13 @@ function App() {
       socket.on("remoteCandidate", (remoteCandidate) => {
         console.log(
           `${connectionModel} got remote candidate! local connection`,
+          "\nlocalConnection: ",
           localConnection,
+          "\nlocalDescription: ",
           localDescription,
-          remoteDescription
+          "\nremoteDescription: ",
+          remoteDescription,
+          "\nThis line raises an error because the local variable in this function is not identical to the value outside."
         );
         localConnection.addIceCandidate(remoteCandidate);
       });
