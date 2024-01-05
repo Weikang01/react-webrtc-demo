@@ -10,26 +10,6 @@ const CONNECTION_MODEL = {
   RECEIVER: "RECEIVER",
 };
 
-const clearConsole = () => {
-  // tslint:disable-next-line: variable-name
-  const _console = console;
-  // tslint:disable-next-line: no-string-literal
-  let consoleAPI = console["API"];
-
-  if (typeof _console._commandLineAPI !== "undefined") {
-    // Chrome
-    consoleAPI = _console._commandLineAPI;
-  } else if (typeof _console._inspectorCommandLineAPI !== "undefined") {
-    // Safari
-    consoleAPI = _console._inspectorCommandLineAPI;
-  } else if (typeof _console.clear !== "undefined") {
-    // rest
-    consoleAPI = _console;
-  }
-
-  consoleAPI.clear();
-};
-
 function App() {
   const USERNAME = `test_user${Math.round(Math.random() * 100)}`;
 
@@ -38,8 +18,8 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [localConnection, setLocalConnection] = useState(null);
   const [localChannel, setLocalChannel] = useState(null);
-  const [localDescription, setLocalDescription] = useState(null);
   const [remoteDescription, setRemoteDescription] = useState(null);
+  const [candidates, setCandidates] = useState(null);
 
   const connectButton = useRef();
   const disconnectButton = useRef();
@@ -47,128 +27,102 @@ function App() {
   const messageInputBox = useRef();
   const receiveBox = useRef();
 
-  useEffect(() => {
-    if (connectionModel) {
-      console.log(`create ${connectionModel} peer connection!`);
-      setLocalConnection(new RTCPeerConnection());
-    }
-  }, [connectionModel]);
+  const receiveChannelCallback = (event) => {
+    setLocalChannel(event.channel);
+    console.log(USERNAME, "received channel callback!");
+  };
 
-  useEffect(() => {
-    if (remoteDescription) {
-      if (connectionModel === CONNECTION_MODEL.RECEIVER) {
-        // remote offer
-        setLocalConnection(new RTCPeerConnection());
-      } else if (connectionModel === CONNECTION_MODEL.SENDER) {
-        // remote answer
-        localConnection.setLocalDescription(localDescription);
-        localConnection.setRemoteDescription(remoteDescription);
-        console.log(
-          `${connectionModel}'s local/remoteDescription are all set!`
-        );
-      }
-    }
-  }, [remoteDescription]);
-
-  useEffect(() => {
-    if (localDescription) {
-      if (connectionModel === CONNECTION_MODEL.RECEIVER) {
-        // answer
-        localConnection.setLocalDescription(localDescription);
-      } else {
-        // offer
-      }
-    }
-  }, [localDescription]);
+  const handleAddCandidateError = (e) => {
+    console.log("Oh noes! addICECandidate failed! ", e);
+  };
 
   useEffect(() => {
     if (socket) {
-      localConnection.onicecandidate = (event) =>
-        !event.candidate || socket.emit("candidate", event.candidate);
-
-      socket.on("remoteOffer", async (remoteOffer) => {
-        clearConsole();
-        console.log(`${connectionModel} server got remoteOffer!`, remoteOffer);
-        setConnectionModel(CONNECTION_MODEL.RECEIVER);
+      socket.on("remoteOffer", (remoteOffer) => {
+        console.log(
+          USERNAME,
+          "received offer!",
+          remoteOffer,
+          "remote description set!"
+        );
         setRemoteDescription(remoteOffer);
+        setConnectionModel(CONNECTION_MODEL.RECEIVER);
+        setLocalConnection(new RTCPeerConnection());
       });
 
-      socket.on("remoteAnswer", async (remoteAnswer) => {
+      socket.on("remoteAnswer", (answer) => {
         console.log(
-          `${connectionModel} server got remoteAnswer!`,
-          remoteAnswer
+          USERNAME,
+          "received answer!",
+          answer,
+          "going to set local and remote description!"
         );
-        setRemoteDescription(remoteAnswer);
+        // localConnection.setLocalDescription(localDescription);
+        localConnection.setRemoteDescription(answer);
       });
 
-      socket.on("remoteCandidate", (remoteCandidate) => {
-        console.log(
-          `${connectionModel} got remote candidate! local connection`,
-          localConnection,
-          localDescription,
-          remoteDescription
-        );
-        localConnection.addIceCandidate(remoteCandidate);
+      socket.on("remoteCandidate", (candidate) => {
+        console.log(USERNAME, "received candidate!", candidate);
+        localConnection.addIceCandidate(candidate);
       });
 
-      if (connectionModel === CONNECTION_MODEL.SENDER) {
-        localConnection.createOffer().then((offer) => {
-          console.log(`${connectionModel} offer created!`);
-          setLocalDescription(offer);
-          socket.emit("offer", offer);
-        });
-      }
+      localConnection.createOffer().then((offer) => {
+        localConnection.setLocalDescription(offer);
+        socket.emit("offer", offer);
+        console.log(USERNAME, "sent offer! local description set!");
+      });
     }
   }, [socket]);
 
   useEffect(() => {
     if (localChannel) {
-      localChannel.onmessage = handleLocalMessage;
+      if (connectionModel === CONNECTION_MODEL.SENDER) {
+        localConnection.onicecandidate = (e) =>
+          !e.candidate || socket.emit("candidate", e.candidate);
+        localConnection.onconnectionstatechange = (e) =>
+          localChannel.connectionState !== "connected" ||
+          console.log("localConnection connected!");
+      }
+
       localChannel.onopen = handleLocalChannelStatusChange;
       localChannel.onclose = handleLocalChannelStatusChange;
-      console.log(`${connectionModel} local channel created!`);
+      localChannel.onerror = (error) =>
+        console.error("dataChannel error:", error);
 
-      if (!socket)
-        setSocket(
-          socketIO.connect(
-            `http://localhost:3001?username=${USERNAME}&roomname=test_room`
-          )
-        );
-      else {
-        let offer = localConnection.createOffer();
-        setLocalDescription(offer);
-        socket.emit("offer", offer);
-      }
+      localChannel.onmessage = handleReceiveMessage;
     }
   }, [localChannel]);
 
   useEffect(() => {
     if (localConnection) {
-      console.log(
-        `${connectionModel} local connection created!`,
-        localConnection
-      );
-
+      console.log("local connection", localConnection, connectionModel);
       if (connectionModel === CONNECTION_MODEL.SENDER) {
-        setLocalChannel(localConnection.createDataChannel("localChannel"));
-      } else if (connectionModel === CONNECTION_MODEL.RECEIVER) {
-        localChannel.ondatachannel = (event) => setLocalChannel(event.channel);
+        localConnection.ondatachannel = receiveChannelCallback;
+        setLocalChannel(localConnection.createDataChannel(`localChannel`));
 
-        localConnection.setRemoteDescription(remoteDescription).then(() =>
-          localConnection.createAnswer().then((answer) => {
-            socket.emit("answer", answer);
-            localConnection.setLocalDescription(answer);
-          })
-        );
-        console.log(
-          `${connectionModel}'s local/remoteDescription are all set!`
-        );
+        if (!socket)
+          setSocket(
+            socketIO.connect(
+              `http://localhost:3001?username=${USERNAME}&roomname=test_room`
+            )
+          );
+      } else if (connectionModel === CONNECTION_MODEL.RECEIVER) {
+        localConnection.ondatachannel = receiveChannelCallback;
+        localConnection.setRemoteDescription(remoteDescription);
+
+        localConnection.createAnswer().then((answer) => {
+          localConnection.setLocalDescription(answer);
+
+          socket.emit("answer", answer);
+          console.log(USERNAME, "sent answer! local description set!");
+        });
       }
     }
   }, [localConnection]);
 
   const connectPeers = async () => {
     setConnectionModel(CONNECTION_MODEL.SENDER);
+    setLocalConnection(new RTCPeerConnection());
   };
 
   const disconnectPeers = () => {
@@ -180,7 +134,6 @@ function App() {
     setLocalChannel(null);
     setLocalConnection(null);
     setSocket(null);
-    setConnectionModel(null);
 
     messageInputBox.current.setAttribute("disabled", true);
     sendButton.current.setAttribute("disabled", true);
@@ -211,8 +164,8 @@ function App() {
     }
   };
 
-  const handleLocalMessage = (event) => {
-    console.log(`${connectionModel} handle local message!`, event);
+  const handleReceiveMessage = (event) => {
+    console.log("handleReceiveMessage > localChannel", localChannel);
     messages.push({
       id: uuidv4(),
       text: event.data,

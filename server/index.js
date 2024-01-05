@@ -22,16 +22,19 @@ class UserData {
   }
 }
 
+const MAX_USER_NUMBER = 2;
+
 class RoomData {
   constructor(username = null, ...user) {
-    this.users = new Map();
+    this.users = [];
     if (username !== null) {
       this.newConnect(username, ...user);
     }
   }
 
   newConnect(username, ...user) {
-    this.users.set(username, new UserData(username, ...user));
+    if (this.users.length === MAX_USER_NUMBER) this.users.shift();
+    this.users.push(new UserData(username, ...user));
   }
 }
 
@@ -53,15 +56,14 @@ io.on("connection", (socket) => {
   } else {
     roomsData.set(roomname, new RoomData(username, socket));
   }
-  let users_in_room = [];
-  roomsData.get(roomname).users.forEach((user) => {
-    users_in_room.push({
+
+  console.log(
+    "users_in_room",
+    roomsData.get(roomname).users.map((user) => ({
       username: user.username,
       socket_id: user.socket.id,
-    });
-  });
-
-  console.log("users_in_room", users_in_room);
+    }))
+  );
 
   socket.on("offer", (data) => {
     if (roomsData.get(roomname) !== undefined) {
