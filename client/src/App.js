@@ -5,9 +5,12 @@ import socketIO from "socket.io-client";
 
 export const RouterContext = createContext();
 
+let socket = null;
+let localConnection = null;
+let localChannel = null;
+
 function App() {
   const USERNAME = `test_user${Math.round(Math.random() * 100)}`;
-  let socket = null;
 
   const [messages, setMessages] = useState([]);
 
@@ -16,9 +19,6 @@ function App() {
   const sendButton = useRef();
   const messageInputBox = useRef();
   const receiveBox = useRef();
-
-  let localConnection = null;
-  let localChannel = null;
 
   const initializeLocalChannelListeners = () => {
     localChannel.onopen = handleLocalChannelStatusChange;
