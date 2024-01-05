@@ -31,8 +31,7 @@ const clearConsole = () => {
 };
 
 function App() {
-  const USERNAME = `test_user${Math.round(Math.random() * 100)}`;
-
+  const [USERNAME, _] = useState(`test_user${Math.round(Math.random() * 100)}`);
   const [connectionModel, setConnectionModel] = useState(null);
   const [socket, setSocket] = useState(null);
   const [messages, setMessages] = useState([]);
