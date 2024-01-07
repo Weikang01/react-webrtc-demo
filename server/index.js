@@ -79,6 +79,15 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("sdpAllSet", () => {
+    if (roomsData.get(roomname) !== undefined) {
+      roomsData.get(roomname).users.forEach((user) => {
+        if (user.username !== username)
+          user.socket.emit("remoteSdpAllSet", true);
+      });
+    }
+  });
+
   socket.on("candidate", (data) => {
     if (roomsData.get(roomname) !== undefined) {
       roomsData.get(roomname).users.forEach((user) => {

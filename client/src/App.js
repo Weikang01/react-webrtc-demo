@@ -6,7 +6,9 @@ export const RouterContext = createContext();
 
 let socket = null;
 let localConnection = null;
-let localOffer = null;
+
+let localDescription = null;
+let remoteDescription = null;
 
 function getUserMedia() {
   //check if the browser supports the WebRTC
@@ -73,6 +75,7 @@ function App() {
       console.log(USERNAME, "received offer! reinitiate local connection!");
       localConnection = new RTCPeerConnection();
 
+      localConnection.ontrack = handleTrack;
       localConnection.onicecandidate = handleIceCandidate;
       localConnection.oniceconnectionstatechange = handleIceStateChange;
 
@@ -88,18 +91,14 @@ function App() {
               .forEach((track) => localConnection.addTrack(track, stream));
             console.log(`${USERNAME} added media tracks!`);
           })
-          .then(() =>
-            localConnection
-              .setRemoteDescription(remoteOffer)
-              .then(() => (localConnection.ontrack = handleTrack))
-              .then(
-                localConnection.createAnswer().then((answer) => {
-                  localConnection.setLocalDescription(answer);
-                  socket.emit("answer", answer);
-                  console.log(USERNAME, "sent answer!");
-                })
-              )
-          )
+          .then(() => {
+            localConnection.createAnswer().then((answer) => {
+              localConnection.setLocalDescription(answer);
+              socket.emit("answer", answer);
+              console.log(USERNAME, "sent answer!");
+              localConnection.setRemoteDescription(remoteOffer);
+            });
+          })
           .catch(
             (e) =>
               `${USERNAME}  error during media track addition and answer sending!`
@@ -109,8 +108,8 @@ function App() {
     socket.on("remoteAnswer", (answer) => {
       console.log(USERNAME, "received answer!");
       localConnection
-        .setLocalDescription(localOffer)
-        .then(() => localConnection.setRemoteDescription(answer));
+        .setRemoteDescription(answer)
+        .then(() => localConnection.setLocalDescription(localDescription));
     });
 
     socket.on("remoteCandidate", (candidate) => {
@@ -143,8 +142,7 @@ function App() {
         })
         .then(() =>
           localConnection.createOffer().then((offer) => {
-            localConnection.setLocalDescription(offer);
-            localOffer = offer;
+            localDescription = offer;
             socket.emit("offer", offer);
             console.log(USERNAME, "sent offer!");
           })
