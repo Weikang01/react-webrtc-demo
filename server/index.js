@@ -88,8 +88,8 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", (what) => {
-    console.log(what);
+  socket.on("disconnect", () => {
+    roomsData.get(roomname).users.delete(username);
   });
 });
 

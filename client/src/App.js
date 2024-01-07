@@ -1,37 +1,66 @@
 // import Webcam from "./components/Webcam";
-import { createContext, useRef, useState } from "react";
-import { v4 as uuidv4 } from "uuid";
+import { createContext, useRef } from "react";
 import socketIO from "socket.io-client";
 
 export const RouterContext = createContext();
 
 let socket = null;
 let localConnection = null;
-let localChannel = null;
+let localOffer = null;
+
+function getUserMedia() {
+  //check if the browser supports the WebRTC
+  return (
+    navigator.mediaDevices.getUserMedia ||
+    navigator.webkitGetUserMedia ||
+    navigator.mozGetUserMedia
+  );
+}
+
+function clearConsole() {
+  const _console = console;
+  let consoleAPI = console["API"];
+  if (typeof _console._commandLineAPI !== "undefined") {
+    // Chrome
+    consoleAPI = _console._commandLineAPI;
+  } else if (typeof _console._inspectorCommandLineAPI !== "undefined") {
+    // Safari
+    consoleAPI = _console._inspectorCommandLineAPI;
+  } else if (typeof _console.clear !== "undefined") {
+    // rest
+    consoleAPI = _console;
+  }
+  consoleAPI.clear();
+}
 
 function App() {
   const USERNAME = `test_user${Math.round(Math.random() * 100)}`;
-
-  const [messages, setMessages] = useState([]);
 
   const connectButton = useRef();
   const disconnectButton = useRef();
   const sendButton = useRef();
   const messageInputBox = useRef();
-  const receiveBox = useRef();
+  const remoteVideo = useRef();
 
-  const initializeLocalChannelListeners = () => {
-    localChannel.onopen = handleLocalChannelStatusChange;
-    localChannel.onclose = handleLocalChannelStatusChange;
-    localChannel.onerror = (error) =>
-      console.error("dataChannel error:", error);
-
-    localChannel.onmessage = handleReceiveMessage;
+  const handleIceCandidate = (event) => {
+    if (event.candidate) {
+      socket.emit("candidate", event.candidate);
+      console.log(USERNAME, "sent candidate!");
+    } else {
+      console.warn(USERNAME, "has no candidate!");
+    }
   };
 
-  const receiveChannelCallback = (event) => {
-    localChannel = event.channel;
-    initializeLocalChannelListeners();
+  const handleIceStateChange = (event) => {
+    if (localConnection) {
+      console.log(
+        USERNAME,
+        "ICE state:",
+        localConnection.iceConnectionState,
+        "event: ",
+        event
+      );
+    }
   };
 
   const initSocket = () => {
@@ -40,62 +69,97 @@ function App() {
     );
 
     socket.on("remoteOffer", (remoteOffer) => {
-      console.log(USERNAME, "received offer!", remoteOffer);
+      clearConsole();
+      console.log(USERNAME, "received offer! reinitiate local connection!");
       localConnection = new RTCPeerConnection();
-      localConnection.ondatachannel = receiveChannelCallback;
 
-      localConnection.setRemoteDescription(remoteOffer);
-      localConnection.onicecandidate = (e) => {
-        socket.emit("candidate", e.candidate);
-        console.log(USERNAME, "sent candidate!");
-      };
+      localConnection.onicecandidate = handleIceCandidate;
+      localConnection.oniceconnectionstatechange = handleIceStateChange;
 
-      localConnection.createAnswer().then((answer) => {
-        localConnection.setLocalDescription(answer);
-        socket.emit("answer", answer);
-        console.log(USERNAME, "sent answer!");
-      });
+      // add stream
+      navigator.mediaDevices.getUserMedia = getUserMedia();
+
+      if (navigator.mediaDevices.getUserMedia)
+        navigator.mediaDevices
+          .getUserMedia({ audio: false, video: true })
+          .then((stream) => {
+            stream
+              .getTracks()
+              .forEach((track) => localConnection.addTrack(track, stream));
+            console.log(`${USERNAME} added media tracks!`);
+          })
+          .then(() =>
+            localConnection
+              .setRemoteDescription(remoteOffer)
+              .then(() => (localConnection.ontrack = handleTrack))
+              .then(
+                localConnection.createAnswer().then((answer) => {
+                  localConnection.setLocalDescription(answer);
+                  socket.emit("answer", answer);
+                  console.log(USERNAME, "sent answer!");
+                })
+              )
+          )
+          .catch(
+            (e) =>
+              `${USERNAME}  error during media track addition and answer sending!`
+          );
     });
 
     socket.on("remoteAnswer", (answer) => {
-      console.log(USERNAME, "received answer!", answer);
-
-      localConnection.setRemoteDescription(answer);
+      console.log(USERNAME, "received answer!");
+      localConnection
+        .setLocalDescription(localOffer)
+        .then(() => localConnection.setRemoteDescription(answer));
     });
 
     socket.on("remoteCandidate", (candidate) => {
-      localConnection.addIceCandidate(candidate);
-      console.log(USERNAME, "received candidate!");
+      localConnection
+        .addIceCandidate(candidate)
+        .then(() => console.log(USERNAME, "received candidate!"));
     });
   };
 
   const connectPeers = () => {
     localConnection = new RTCPeerConnection();
-    localConnection.ondatachannel = receiveChannelCallback;
-    localChannel = localConnection.createDataChannel(`localChannel`);
-    initializeLocalChannelListeners();
-    console.log("connectPeers", localChannel);
 
     if (!socket) initSocket();
 
-    localConnection.onicecandidate = (e) => {
-      socket.emit("candidate", e.candidate);
-      console.log(USERNAME, "sent candidate!");
-    };
+    localConnection.onicecandidate = handleIceCandidate;
+    localConnection.oniceconnectionstatechange = handleIceStateChange;
+    localConnection.ontrack = handleTrack;
 
-    localConnection.createOffer().then((offer) => {
-      localConnection.setLocalDescription(offer);
-      socket.emit("offer", offer);
-      console.log(USERNAME, "sent offer!");
-    });
+    // add stream
+    navigator.mediaDevices.getUserMedia = getUserMedia();
+
+    if (navigator.mediaDevices.getUserMedia)
+      navigator.mediaDevices
+        .getUserMedia({ audio: false, video: true })
+        .then((stream) => {
+          stream
+            .getTracks()
+            .forEach((track) => localConnection.addTrack(track, stream));
+          console.log(`${USERNAME} added media tracks!`);
+        })
+        .then(() =>
+          localConnection.createOffer().then((offer) => {
+            localConnection.setLocalDescription(offer);
+            localOffer = offer;
+            socket.emit("offer", offer);
+            console.log(USERNAME, "sent offer!");
+          })
+        )
+        .catch((e) =>
+          console.log(
+            `${USERNAME} error during media track addition and offer sending!`
+          )
+        );
   };
 
   const disconnectPeers = () => {
     console.log("disconnecting...");
-    localChannel.close();
     localConnection.close();
 
-    localChannel = null;
     localConnection = null;
 
     messageInputBox.current.setAttribute("disabled", true);
@@ -105,49 +169,14 @@ function App() {
     disconnectButton.current.setAttribute("disabled", true);
   };
 
-  const handleLocalChannelStatusChange = (event) => {
-    if (localChannel) {
-      var state = localChannel.readyState;
-      console.log("local channel status:", localChannel.readyState);
-
-      if (state === "open") {
-        messageInputBox.current.removeAttribute("disabled");
-        messageInputBox.current.focus();
-        sendButton.current.removeAttribute("disabled");
-        disconnectButton.current.removeAttribute("disabled");
-        connectButton.current.setAttribute("disabled", true);
-      } else {
-        messageInputBox.current.setAttribute("disabled", true);
-        sendButton.current.setAttribute("disabled", true);
-        connectButton.current.removeAttribute("disabled");
-        disconnectButton.current.setAttribute("disabled", true);
-      }
-    } else {
-      console.log("handleLocalChannelStatusChange localChannel == null", event);
-    }
-  };
-
-  const handleReceiveMessage = (event) => {
-    console.log("handleReceiveMessage > localChannel", localChannel);
-    messages.push({
-      id: uuidv4(),
-      text: event.data,
-    });
-
-    setMessages([...messages]);
+  const handleTrack = async (event) => {
+    console.log(`${USERNAME} handling track!`);
+    const [remoteStream] = event.streams;
+    remoteVideo.current.srcObject = remoteStream;
   };
 
   const sendMessage = () => {
-    console.log("sendMessage > localChannel ", localChannel);
-    if (!localChannel) {
-      return;
-    }
-
-    localChannel.send(messageInputBox.current.value);
-
-    messageInputBox.current.value = "";
-    messageInputBox.current.focus();
-    console.log("message sent!");
+    console.log("sendMessage!");
   };
 
   return (
@@ -185,16 +214,7 @@ function App() {
           Send
         </button>
       </div>
-      <div id="receivebox" ref={receiveBox}>
-        <p>Messages received:</p>
-        {messages.map((msg) => {
-          return (
-            <div key={msg.id}>
-              <p>{msg.text}</p>
-            </div>
-          );
-        })}
-      </div>
+      <video autoPlay controls muted ref={remoteVideo}></video>
     </>
   );
 }
