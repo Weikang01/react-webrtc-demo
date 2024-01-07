@@ -6,9 +6,7 @@ export const RouterContext = createContext();
 
 let socket = null;
 let localConnection = null;
-
 let localDescription = null;
-let remoteDescription = null;
 
 function getUserMedia() {
   //check if the browser supports the WebRTC
@@ -62,6 +60,8 @@ function App() {
         "event: ",
         event
       );
+    } else {
+      console.log(USERNAME, event);
     }
   };
 
@@ -92,12 +92,14 @@ function App() {
             console.log(`${USERNAME} added media tracks!`);
           })
           .then(() => {
-            localConnection.createAnswer().then((answer) => {
-              localConnection.setLocalDescription(answer);
-              socket.emit("answer", answer);
-              console.log(USERNAME, "sent answer!");
-              localConnection.setRemoteDescription(remoteOffer);
-            });
+            console.log(`${USERNAME} added remote offer!`);
+            localConnection.setRemoteDescription(remoteOffer).then(() =>
+              localConnection.createAnswer().then((answer) => {
+                localConnection.setLocalDescription(answer);
+                socket.emit("answer", answer);
+                console.log(USERNAME, "sent answer!");
+              })
+            );
           })
           .catch(
             (e) =>
@@ -108,8 +110,8 @@ function App() {
     socket.on("remoteAnswer", (answer) => {
       console.log(USERNAME, "received answer!");
       localConnection
-        .setRemoteDescription(answer)
-        .then(() => localConnection.setLocalDescription(localDescription));
+        .setLocalDescription(localDescription)
+        .then(() => localConnection.setRemoteDescription(answer));
     });
 
     socket.on("remoteCandidate", (candidate) => {
@@ -124,9 +126,9 @@ function App() {
 
     if (!socket) initSocket();
 
+    localConnection.ontrack = handleTrack;
     localConnection.onicecandidate = handleIceCandidate;
     localConnection.oniceconnectionstatechange = handleIceStateChange;
-    localConnection.ontrack = handleTrack;
 
     // add stream
     navigator.mediaDevices.getUserMedia = getUserMedia();
@@ -145,6 +147,11 @@ function App() {
             localDescription = offer;
             socket.emit("offer", offer);
             console.log(USERNAME, "sent offer!");
+
+            messageInputBox.current.removeAttribute("disabled");
+            sendButton.current.removeAttribute("disabled");
+            connectButton.current.setAttribute("disabled", true);
+            disconnectButton.current.removeAttribute("disabled");
           })
         )
         .catch((e) =>
@@ -156,8 +163,11 @@ function App() {
 
   const disconnectPeers = () => {
     console.log("disconnecting...");
+    socket.disconnect();
+    console.log("disconnecting...");
     localConnection.close();
 
+    socket = null;
     localConnection = null;
 
     messageInputBox.current.setAttribute("disabled", true);
@@ -165,6 +175,8 @@ function App() {
     connectButton.current.removeAttribute("disabled");
     messageInputBox.current.value = "";
     disconnectButton.current.setAttribute("disabled", true);
+
+    console.log("disconnected!");
   };
 
   const handleTrack = async (event) => {
@@ -187,7 +199,7 @@ function App() {
           id="disconnect"
           onClick={disconnectPeers}
           ref={disconnectButton}
-          // disabled
+          disabled
         >
           Disconnect
         </button>
@@ -203,12 +215,7 @@ function App() {
             // disabled
           />
         </label>
-        <button
-          id="send"
-          ref={sendButton}
-          onClick={sendMessage}
-          // disabled
-        >
+        <button id="send" ref={sendButton} onClick={sendMessage} disabled>
           Send
         </button>
       </div>
